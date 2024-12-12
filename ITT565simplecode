@@ -1,0 +1,90 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/wait.h> // For waitpid()
+
+int main() {
+    int pipefd[2];
+    pid_t pid;
+    char buffer[100];
+    char message[100];
+    char retry;
+
+    if (pipe(pipefd) == -1) {
+        perror("Pipe failed");
+        exit(EXIT_FAILURE);
+    }
+
+    pid = fork();
+
+    if (pid < 0) {
+        perror("Fork failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid == 0) {
+        // Child process
+        close(pipefd[1]); // Close write end
+
+        while (1) {
+            if (read(pipefd[0], buffer, sizeof(buffer)) <= 0) {
+                // Break if pipe is closed or no data is received
+                break;
+            }
+
+            if (strcmp(buffer, "exit") == 0) {
+                break;
+            }
+
+            printf("Child--Message transmitted: %s\n", buffer);
+            fflush(stdout); // Ensure child output is printed immediately
+        }
+
+        close(pipefd[0]);
+        exit(0);
+
+    } else {
+        // Parent process
+        close(pipefd[0]); // Close read end
+
+        do {
+            printf("Parent--Enter a message: ");
+            fflush(stdout); // Ensure prompt is displayed immediately
+            fgets(message, sizeof(message), stdin);
+
+            // Remove newline character from fgets input
+            message[strcspn(message, "\n")] = '\0';
+
+            write(pipefd[1], message, strlen(message) + 1);
+
+            if (strcmp(message, "exit") == 0) {
+                break;
+            }
+
+            // Allow child to print its message before prompting retry
+            sleep(1);
+
+            printf("Testing commence retry? Y or N: ");
+            fflush(stdout);
+
+            fgets(message, sizeof(message), stdin);  // Use fgets for retry input
+            retry = message[0];  // Take the first character from the input
+
+            // Clear the remaining input if there's any
+            if (strlen(message) > 1) {
+                while (getchar() != '\n');  // Clear the buffer
+            }
+
+        } while (retry == 'Y' || retry == 'y');
+
+        close(pipefd[1]); // Properly close the write end of the pipe
+
+        // Wait for the child process to finish
+        waitpid(pid, NULL, 0);
+
+        printf("Exiting program...\n");
+    }
+
+    return 0;
+}
